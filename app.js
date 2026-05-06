@@ -107,7 +107,30 @@ class DMRGenerator {
         this.renderLibrary();
         window.addEventListener('resize', () => this.resizeCanvas());
         this.drawVisualizer();
+        this._showIOSWarning();
     }
+
+    _showIOSWarning() {
+        var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        if (!isIOS) return;
+
+        var banner = document.createElement('div');
+        banner.id = 'ios-mute-banner';
+        banner.innerHTML =
+            '🔇 <strong>iOS detectado:</strong> Desactiva el <strong>switch de silencio</strong> ' +
+            '(lateral izquierdo del iPhone) para escuchar los tonos. ' +
+            '<button id="ios-banner-close" style="margin-left:8px;background:rgba(255,255,255,0.2);border:none;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:0.8rem;">OK</button>';
+        banner.style.cssText =
+            'position:fixed;top:0;left:0;right:0;z-index:9999;' +
+            'background:linear-gradient(90deg,#e65100,#bf360c);' +
+            'color:#fff;padding:10px 16px;font-size:0.82rem;text-align:center;' +
+            'font-family:system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+        document.body.prepend(banner);
+        document.getElementById('ios-banner-close').onclick = function() {
+            banner.remove();
+        };
+    }
+
 
     setupEventListeners() {
         document.getElementById('btn-add-burst').onclick    = () => this.addBurst();
