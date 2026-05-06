@@ -273,31 +273,15 @@ class DMRGenerator {
     // ─── Audio Engine ─────────────────────────────────────────────────────
     initAudio() {
         if (!this.audioCtx) {
-            // iOS WebKit (Chrome/Safari) may not support custom sampleRate — fallback gracefully
-            try {
-                this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
-            } catch(e) {
-                this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
+            const AC = window.AudioContext || window.webkitAudioContext;
+            try   { this.audioCtx = new AC({ sampleRate: 44100 }); }
+            catch  { this.audioCtx = new AC(); }
             this.analyser = this.audioCtx.createAnalyser();
             this.analyser.fftSize = 2048;
             this.visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
             document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ACTIVE';
             document.getElementById('samplerate').innerText   = 'SR: 44.1kHz';
         }
-    }
-
-    // iOS requires playing a silent buffer on first user gesture to unlock WebAudio
-    async _unlockAudio() {
-        if (this.audioCtx.state === 'suspended') {
-            await this.audioCtx.resume();
-        }
-        // Silent buffer trick for iOS
-        const buf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
-        const src = this.audioCtx.createBufferSource();
-        src.buffer = buf;
-        src.connect(this.audioCtx.destination);
-        src.start(0);
     }
 
     _parseFreq(str) {
@@ -315,9 +299,10 @@ class DMRGenerator {
         const { isSweep, freqA, freqB } = this._parseFreq(freqStr);
         if (freqA <= 0) return; // silence
 
-        const dur     = endTime - startTime;
-        const fadeInD  = Math.min(fadeIn,  dur / 3);
-        const fadeOutD = Math.min(fadeOut, dur / 3);
+        const dur      = endTime - startTime;
+        // iOS is strict about click noise — enforce 12ms minimum fade
+        const fadeInD  = Math.min(Math.max(fadeIn,  0.012), dur / 3);
+        const fadeOutD = Math.min(Math.max(fadeOut, 0.012), dur / 3);
 
         const osc  = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -340,29 +325,30 @@ class DMRGenerator {
     }
 
     async playSequence() {
+        // ── Step 1: create context inside gesture (sync) ─────────────────
         this.initAudio();
 
-        // ── iOS WebAudio unlock ──────────────────────────────────────────
-        // Must be SYNCHRONOUS and within the user gesture — no await before this.
-        // Calling resume() + playing a silent buffer unlocks audio on iOS/WebKit.
-        this.audioCtx.resume(); // fire-and-forget (no await)
+        // ── Step 2: silent buffer — unlocks iOS audio permission (sync) ──
+        // Must happen BEFORE any await so we're still in the gesture context.
         const silBuf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
         const silSrc = this.audioCtx.createBufferSource();
         silSrc.buffer = silBuf;
         silSrc.connect(this.audioCtx.destination);
         silSrc.start(0);
-        // ────────────────────────────────────────────────────────────────
 
+        // ── Step 3: await resume — now context is truly running ───────────
+        // iOS: currentTime is frozen while suspended. We must wait for
+        // resume() to resolve before reading currentTime for scheduling.
+        await this.audioCtx.resume();
+
+        // ── Step 4: schedule tones using fresh currentTime ────────────────
         this.stopSequence();
         this.updateBurstList();
         if (this.bursts.length === 0) return;
 
         this.isPlaying = true;
         document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
-
-        // Give iOS extra time to actually resume the context before scheduling
-        const startOffset = this.audioCtx.state !== 'running' ? 0.4 : 0.08;
-        let startTime = this.audioCtx.currentTime + startOffset;
+        let startTime = this.audioCtx.currentTime + 0.08;
 
         this.bursts.forEach(burst => {
             const end   = startTime + burst.dur / 1000;
@@ -496,11 +482,23 @@ class DMRGenerator {
         });
 
         offCtx.startRendering().then(buf => {
-            const blob = this._bufferToWav(buf);
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `dmr_tone_${Date.now()}.wav`;
-            a.click();
+            const blob    = this._bufferToWav(buf);
+            const blobUrl = URL.createObjectURL(blob);
+            const isIOS   = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+            if (isIOS) {
+                // iOS Safari/Chrome block blob downloads — open in new tab instead.
+                // User must long-press the audio and choose "Save to Files".
+                window.open(blobUrl, '_blank');
+                alert('iOS: mantén presionado el audio en la nueva pestaña y selecciona "Guardar en Archivos".');
+            } else {
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = `dmr_tone_${Date.now()}.wav`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }
         });
     }
 
