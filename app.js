@@ -341,14 +341,28 @@ class DMRGenerator {
 
     async playSequence() {
         this.initAudio();
-        await this._unlockAudio(); // handles iOS WebAudio unlock + resume
+
+        // ── iOS WebAudio unlock ──────────────────────────────────────────
+        // Must be SYNCHRONOUS and within the user gesture — no await before this.
+        // Calling resume() + playing a silent buffer unlocks audio on iOS/WebKit.
+        this.audioCtx.resume(); // fire-and-forget (no await)
+        const silBuf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
+        const silSrc = this.audioCtx.createBufferSource();
+        silSrc.buffer = silBuf;
+        silSrc.connect(this.audioCtx.destination);
+        silSrc.start(0);
+        // ────────────────────────────────────────────────────────────────
+
         this.stopSequence();
         this.updateBurstList();
         if (this.bursts.length === 0) return;
 
         this.isPlaying = true;
         document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
-        let startTime = this.audioCtx.currentTime + 0.05;
+
+        // Give iOS extra time to actually resume the context before scheduling
+        const startOffset = this.audioCtx.state !== 'running' ? 0.4 : 0.08;
+        let startTime = this.audioCtx.currentTime + startOffset;
 
         this.bursts.forEach(burst => {
             const end   = startTime + burst.dur / 1000;
