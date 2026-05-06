@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMR Tone Generator | Motorola Dispatch</title>
+    <meta name="description" content="Generador de tonos DMR con plantillas Zetron y Motorola Quick Call II. Compatible con codecs AMBE+2 de MOTOTRBO.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;600;800&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+
+<!-- ─── Help Modal ─────────────────────────────────────────────────────── -->
+<div id="help-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Guía de uso">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span class="modal-title">¿CÓMO USAR DMR TONE GEN?</span>
+            <button id="modal-close" class="modal-close" title="Cerrar">×</button>
+        </div>
+        <div class="modal-body">
+
+            <div class="help-section">
+                <h4>¿QUÉ ES DMR TONE GEN?</h4>
+                <p>Generador de tonos de despacho compatible con el estándar <strong>Motorola Quick Call II (QC2)</strong> y las alertas nativas <strong>Zetron (Model 15P/25/284)</strong>. Diseñado para sistemas de radio DMR Motorola MOTOTRBO.</p>
+            </div>
+
+            <div class="help-section">
+                <h4>CÓMO GENERAR UN TONO</h4>
+                <ol>
+                    <li>Selecciona una plantilla desde el dropdown de la izquierda, o crea tu propia secuencia desde cero con <code>+ ADD BURST</code>.</li>
+                    <li>Cada burst es un tono individual dentro de la secuencia. Configura frecuencia, duración, tipo de onda, fade in y fade out.</li>
+                    <li>Presiona <code>PLAY</code> para previsualizar el tono en tiempo real con el visualizador de onda.</li>
+                    <li>Si suena bien, presiona <code>EXPORT WAV</code> para descargar el archivo listo para tu consola de despacho.</li>
+                </ol>
+            </div>
+
+            <div class="help-section">
+                <h4>SINTAXIS DEL CAMPO FRECUENCIA</h4>
+                <div class="syntax-table">
+                    <div class="syntax-row">
+                        <code>1000</code>
+                        <span>Tono puro a 1000 Hz</span>
+                    </div>
+                    <div class="syntax-row">
+                        <code>800→1500</code>
+                        <span>Sweep: barrido lineal de 800 Hz a 1500 Hz durante la duración del burst. Úsalo para sirenas. Escribe <strong>800-&gt;1500</strong> o usa el botón <strong>⟶ SWEEP</strong>.</span>
+                    </div>
+                    <div class="syntax-row">
+                        <code>1000, 1500</code>
+                        <span>Polyphony: reproduce 1000 Hz y 1500 Hz simultáneamente (el volumen se reparte). Separa con coma o usa el botón <strong>+ POLY</strong>.</span>
+                    </div>
+                    <div class="syntax-row">
+                        <code>0</code>
+                        <span>Silencio. Útil para pausas entre beeps.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="help-section">
+                <h4>PLANTILLAS DISPONIBLES</h4>
+                <div class="template-help-list">
+                    <div class="thl-row"><span class="thl-badge zetron">ZETRON</span><div><strong>Hi-Lo Alert</strong> — alternada 1500/800 Hz, 4 ciclos</div></div>
+                    <div class="thl-row"><span class="thl-badge zetron">ZETRON</span><div><strong>Five Beeps</strong> — 5 pitidos a 1006.9 Hz, 200ms ON / 100ms OFF</div></div>
+                    <div class="thl-row"><span class="thl-badge zetron">ZETRON</span><div><strong>Slow Siren</strong> — barrido lento 800→1500 Hz, 2 ciclos (~6 s)</div></div>
+                    <div class="thl-row"><span class="thl-badge zetron">ZETRON</span><div><strong>Fast Siren</strong> — barrido rápido 800→1500 Hz, 4 ciclos (~3.2 s)</div></div>
+                    <div class="thl-row"><span class="thl-badge qc2">QC2</span><div><strong>2-Tone QC2</strong> — Tono A (1 s) + Tono B (3 s), frecuencias definidas por el usuario</div></div>
+                    <div class="thl-row"><span class="thl-badge qc2">QC2</span><div><strong>3-Tone QC2</strong> — A (1 s) + B (1 s) + C (3 s), frecuencias variables</div></div>
+                    <div class="thl-row"><span class="thl-badge qc2">QC2</span><div><strong>2-Tone + 5 Beep</strong> — 2-Tone QC2 seguido de 5 beeps Zetron a 1006.9 Hz</div></div>
+                </div>
+            </div>
+
+            <div class="help-section">
+                <h4>CONSEJOS IMPORTANTES</h4>
+                <ul>
+                    <li>Usa siempre tipo de onda <strong>Sine</strong> para sonar idéntico al estándar Zetron. Triangle y Square agregan armónicos que distorsionan el tono en el codec.</li>
+                    <li>El <strong>Fade In</strong> y <strong>Fade Out</strong> evitan clics audibles al inicio y final de cada burst. Valores recomendados: <strong>10 ms</strong> para tonos largos, <strong>8 ms</strong> para beeps cortos.</li>
+                    <li>Todas las frecuencias deben estar entre <strong>553 y 1600 Hz</strong> para pasar correctamente por el codec AMBE+2 del DMR. Valores fuera de rango se recortarán automáticamente.</li>
+                    <li>El WAV se exporta a <strong>44100 Hz, 16-bit mono</strong>, compatible con consolas de despacho y equipos de radio profesionales.</li>
+                </ul>
+            </div>
+
+            <div class="help-section">
+                <h4>LIBRERÍA LOCAL</h4>
+                <p>Guarda tus tonos personalizados con un nombre usando <strong>GUARDAR EN LIBRERÍA</strong>. Los datos se almacenan en el navegador (localStorage). Usa <strong>EXPORT JSON</strong> para hacer respaldo o compartir con otros operadores, e <strong>IMPORT JSON</strong> para restaurarlos.</p>
+            </div>
+
+            <div class="help-section">
+                <h4>GLOSARIO RÁPIDO</h4>
+                <div class="glossary">
+                    <div class="gloss-row"><code>Burst</code><span>Segmento de tono dentro de la secuencia</span></div>
+                    <div class="gloss-row"><code>Fade In/Out</code><span>Transición suave de entrada/salida del tono para evitar clics</span></div>
+                    <div class="gloss-row"><code>Sweep</code><span>Barrido lineal de frecuencia (800->1500). Usado en sirenas</span></div>
+                    <div class="gloss-row"><code>Polyphony</code><span>Dos o más frecuencias simultáneas separadas por coma</span></div>
+                    <div class="gloss-row"><code>QC2</code><span>Motorola Quick Call II, estándar de paginación 2-tone</span></div>
+                    <div class="gloss-row"><code>AMBE+2</code><span>Codec de audio del radio digital DMR Motorola</span></div>
+                    <div class="gloss-row"><code>SR</code><span>Sample Rate — frecuencia de muestreo del audio (44100 Hz)</span></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- ─── App ───────────────────────────────────────────────────────────── -->
+<div class="app-container">
+    <header>
+        <div class="logo-area">
+            <div class="status-dot"></div>
+            <h1>DMR TONE <span>GEN v1.2</span></h1>
+        </div>
+        <div class="header-controls">
+            <button id="btn-help" class="btn-help" title="Guía de uso">?</button>
+            <button id="btn-export" class="btn secondary">EXPORT WAV</button>
+        </div>
+    </header>
+
+    <main>
+        <section class="visualizer-panel card">
+            <canvas id="waveform-canvas"></canvas>
+            <div class="visualizer-overlay">
+                <span class="label">SIGNAL MONITOR</span>
+            </div>
+        </section>
+
+        <section class="control-grid">
+            <!-- LEFT PANEL -->
+            <aside class="templates-panel card">
+
+                <div class="panel-section">
+                    <h3>PLANTILLAS</h3>
+                    <select id="template-select" class="template-select">
+                        <option value="">— Seleccionar plantilla —</option>
+                        <optgroup label="🔊 Estándar Zetron">
+                            <option value="zetron-hilo">Hi-Lo Alert</option>
+                            <option value="zetron-5beep">Five Beeps</option>
+                            <option value="zetron-slow-siren">Slow Siren</option>
+                            <option value="zetron-fast-siren">Fast Siren</option>
+                        </optgroup>
+                        <optgroup label="📡 Estándar QC2 (Motorola)">
+                            <option value="qc2-2tone">2-Tone QC2</option>
+                            <option value="qc2-3tone">3-Tone QC2</option>
+                            <option value="qc2-2tone-5beep">2-Tone + 5 Beep</option>
+                        </optgroup>
+                        <optgroup label="📻 Plantillas Base">
+                            <option value="base-alert1">Motorola Alert 1</option>
+                            <option value="base-alert2">Motorola Alert 2</option>
+                            <option value="base-alert3">Motorola Alert 3</option>
+                            <option value="base-prio">Priority Alert</option>
+                        </optgroup>
+                    </select>
+
+                    <div id="template-info" class="template-info hidden">
+                        <span id="template-std-badge" class="std-badge"></span>
+                        <span id="template-desc" class="template-desc-text"></span>
+                    </div>
+
+                    <div id="qc2-inputs" class="qc2-panel hidden">
+                        <div class="qc2-header">FRECUENCIAS REQUERIDAS</div>
+                        <div id="qc2-fields" class="qc2-fields"></div>
+                        <button id="btn-load-template" class="btn primary full-width" style="margin-top:12px;">CARGAR SECUENCIA →</button>
+                    </div>
+
+                    <button id="btn-load-preset" class="btn primary full-width hidden" style="margin-top:12px;">CARGAR SECUENCIA →</button>
+                </div>
+
+                <div class="panel-section" style="margin-top: 22px;">
+                    <h3>GUARDAR TONO ACTUAL</h3>
+                    <input type="text" id="input-save-name" placeholder="Nombre (ej. Alerta Incendio)">
+                    <button id="btn-save-library" class="btn primary full-width" style="margin-top: 8px;">GUARDAR EN LIBRERÍA</button>
+                </div>
+
+                <div class="panel-section" style="margin-top: 22px;">
+                    <h3>LIBRERÍA LOCAL</h3>
+                    <div id="library-container" class="library-list"></div>
+                </div>
+
+                <div class="panel-section" style="margin-top: 22px;">
+                    <h3>ARCHIVOS</h3>
+                    <div class="project-controls">
+                        <button id="btn-export-json" class="btn secondary outline full-width">EXPORT JSON</button>
+                        <button id="btn-import-json" class="btn secondary outline full-width" style="margin-top: 8px;">IMPORT JSON</button>
+                        <input type="file" id="input-import" accept=".json" style="display: none;">
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <p>AMBE+2 BAND: 553Hz – 1600Hz</p>
+                    <p style="margin-top:4px; opacity:0.7">Sweep: <code>800->1500</code> &nbsp;|&nbsp; Poly: <code>1000, 1500</code></p>
+                </div>
+            </aside>
+
+            <!-- RIGHT PANEL -->
+            <div class="sequencer-panel card">
+                <div class="panel-header">
+                    <h3>TONE SEQUENCER</h3>
+                    <div class="master-playback">
+                        <button id="btn-play" class="btn primary">PLAY</button>
+                        <button id="btn-stop" class="btn danger">STOP</button>
+                        <button id="btn-clear" class="btn ghost">CLEAR</button>
+                    </div>
+                </div>
+
+                <div id="burst-container" class="burst-list"></div>
+
+                <button id="btn-add-burst" class="btn-add">
+                    <span class="icon">+</span> ADD BURST
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="system-status">
+            <span id="audio-status">AUDIO ENGINE: READY</span>
+            <span id="samplerate">SR: 44.1kHz</span>
+        </div>
+    </footer>
+</div>
+
+<!-- ─── Burst Template ────────────────────────────────────────────────── -->
+<template id="burst-template">
+    <div class="burst-item card-sub">
+        <div class="burst-number"></div>
+        <div class="burst-body">
+            <div class="burst-row-main">
+                <div class="input-group freq-group">
+                    <label>FRECUENCIA (Hz)</label>
+                    <div class="freq-input-wrap">
+                        <input type="text" class="input-freq" value="1000" placeholder="1000">
+                        <button class="freq-helper sweep-btn" title="Agregar sweep de frecuencia (barrido)">⟶</button>
+                        <button class="freq-helper poly-btn" title="Agregar frecuencia simultánea (polyphony)">+f</button>
+                    </div>
+                </div>
+                <div class="input-group">
+                    <label>DURACIÓN (ms)</label>
+                    <input type="number" class="input-dur" value="500" min="50" max="10000">
+                </div>
+                <div class="input-group">
+                    <label>TIPO</label>
+                    <select class="input-type">
+                        <option value="sine">Sine</option>
+                        <option value="square">Square</option>
+                        <option value="triangle">Triangle</option>
+                        <option value="sawtooth">Sawtooth</option>
+                    </select>
+                </div>
+            </div>
+            <div class="burst-row-fade">
+                <div class="input-group">
+                    <label>FADE IN (ms)</label>
+                    <input type="number" class="input-fadein" value="10" min="1" max="500">
+                </div>
+                <div class="input-group">
+                    <label>FADE OUT (ms)</label>
+                    <input type="number" class="input-fadeout" value="10" min="1" max="500">
+                </div>
+                <div class="burst-silence-hint"></div>
+            </div>
+        </div>
+        <button class="btn-remove" title="Eliminar Burst">×</button>
+    </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

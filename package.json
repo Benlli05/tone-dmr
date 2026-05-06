@@ -1,0 +1,17 @@
+{
+  "name": "dmr-tone-generator",
+  "version": "1.0.0",
+  "description": "Motorola DMR Dispatch Tone Generator",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve -p 5050 ."
+  },
+  "keywords": [
+    "dmr",
+    "motorola",
+    "radio",
+    "audio"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}
