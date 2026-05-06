@@ -389,17 +389,6 @@ class DMRGenerator {
     }
 
     async playSequence() {
-        // Ensure context exists
-        this.initAudio();
-
-        // If global unlock hasn't fired yet, do it now (first interaction = PLAY)
-        if (!this._audioUnlocked && this._unlockFn) {
-            this._unlockFn();
-        }
-
-        // Await resume
-        await this.audioCtx.resume();
-
         this.stopSequence();
         this.updateBurstList();
         if (this.bursts.length === 0) return;
@@ -407,8 +396,8 @@ class DMRGenerator {
         this.isPlaying = true;
         document.getElementById('audio-status').innerText = 'AUDIO ENGINE: RENDERING...';
 
-        // ── Render offline first (same method as export — proven to work on iOS) ──
-        var sampleRate   = this.audioCtx.sampleRate || 44100;
+        // ── Render audio offline (OfflineAudioContext — works on all platforms) ──
+        var sampleRate   = 44100;
         var totalSamples = Math.floor(this.bursts.reduce(function(a, b) { return a + b.dur; }, 0) / 1000 * sampleRate);
         if (totalSamples < 1) totalSamples = 1;
         var offCtx = new OfflineAudioContext(1, totalSamples, sampleRate);
@@ -417,8 +406,10 @@ class DMRGenerator {
         var self = this;
         this.bursts.forEach(function(burst) {
             var end   = startTime + burst.dur / 1000;
-            var parts = burst.freqs.indexOf('->') !== -1 ? [burst.freqs] : burst.freqs.split(',').map(function(f) { return f.trim(); });
-            var vol   = 1 / parts.length;
+            var parts = burst.freqs.indexOf('->') !== -1
+                ? [burst.freqs]
+                : burst.freqs.split(',').map(function(f) { return f.trim(); });
+            var vol = 1 / parts.length;
             for (var i = 0; i < parts.length; i++) {
                 self._scheduleOsc(offCtx, offCtx.destination, parts[i], burst.type, startTime, end, burst.fadeIn, burst.fadeOut, vol);
             }
@@ -428,43 +419,51 @@ class DMRGenerator {
         try {
             var buffer = await offCtx.startRendering();
 
-            // ── Play the rendered buffer through the live AudioContext ──
-            var source = this.audioCtx.createBufferSource();
-            source.buffer = buffer;
+            // ── Convert to WAV blob and play via HTML5 <audio> ──
+            // This bypasses AudioContext entirely for output.
+            // iOS fully supports <audio>.play() from a user gesture.
+            var blob = this._bufferToWav(buffer);
+            var url  = URL.createObjectURL(blob);
 
-            // Connect to destination directly (guaranteed audio output)
-            source.connect(this.audioCtx.destination);
+            this._playbackAudio = new Audio(url);
+            this._playbackWaveData = buffer.getChannelData(0); // for visualizer
+            this._playbackStartTime = null;
+            this._playbackDuration  = buffer.duration;
 
-            // Also feed the analyser for visualization (parallel tap, no double audio)
-            if (this.analyser) {
-                source.connect(this.analyser);
-            }
-
-            source.start(0);
-            this.activeNodes.push(source);
-
-            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
-
-            var totalMs = buffer.duration * 1000;
-            this.sequenceTimeout = setTimeout(function() {
+            this._playbackAudio.onended = function() {
                 self.isPlaying = false;
+                self._playbackWaveData = null;
                 document.getElementById('audio-status').innerText = 'AUDIO ENGINE: READY';
-            }, totalMs);
+                URL.revokeObjectURL(url);
+            };
+
+            await this._playbackAudio.play();
+            this._playbackStartTime = performance.now();
+            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
         } catch(e) {
             this.isPlaying = false;
-            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ERROR';
+            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ERROR - ' + (e.message || e);
         }
     }
 
     stopSequence() {
         clearTimeout(this.sequenceTimeout);
+        if (this._playbackAudio) {
+            try {
+                this._playbackAudio.pause();
+                this._playbackAudio.currentTime = 0;
+            } catch(e) {}
+            this._playbackAudio = null;
+        }
         if (this.audioCtx) {
-            this.activeNodes.forEach(node => { try { node.disconnect(); } catch(e) {} });
+            this.activeNodes.forEach(function(node) { try { node.disconnect(); } catch(e) {} });
         }
         this.activeNodes = [];
-        this.isPlaying   = false;
+        this._playbackWaveData = null;
+        this.isPlaying = false;
         document.getElementById('audio-status').innerText = 'AUDIO ENGINE: READY';
     }
+
 
     clearAll() { this.burstContainer.innerHTML = ''; this.updateBurstList(); }
 
@@ -618,27 +617,45 @@ class DMRGenerator {
 
     drawVisualizer() {
         requestAnimationFrame(() => this.drawVisualizer());
-        const ctx = this.canvasCtx;
-        const W = this.canvas.width, H = this.canvas.height;
+        var ctx = this.canvasCtx;
+        var W = this.canvas.width, H = this.canvas.height;
 
-        if (!this.analyser) {
-            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-            ctx.strokeStyle = 'rgba(255,176,0,0.15)'; ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, H);
+
+        // If we have rendered waveform data from playback, animate it
+        if (this._playbackWaveData && this._playbackStartTime && this.isPlaying) {
+            var elapsed  = (performance.now() - this._playbackStartTime) / 1000;
+            var progress = elapsed / this._playbackDuration;
+            if (progress > 1) progress = 1;
+
+            var data     = this._playbackWaveData;
+            var center   = Math.floor(progress * data.length);
+            var viewSize = Math.min(2048, data.length);
+            var start    = Math.max(0, center - Math.floor(viewSize / 2));
+            var end      = Math.min(data.length, start + viewSize);
+
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#ffb000';
+            ctx.beginPath();
+            var sw = W / (end - start);
+            var x  = 0;
+            for (var i = start; i < end; i++) {
+                var y = (1 - data[i]) * H / 2;
+                i === start ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                x += sw;
+            }
+            ctx.stroke();
             return;
         }
 
-        this.analyser.getByteTimeDomainData(this.visualizerData);
-        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-        ctx.lineWidth = 2; ctx.strokeStyle = '#ffb000'; ctx.beginPath();
-        const sw = W / this.visualizerData.length;
-        let x = 0;
-        for (let i = 0; i < this.visualizerData.length; i++) {
-            const y = (this.visualizerData[i] / 128.0) * H / 2;
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-            x += sw;
-        }
-        ctx.lineTo(W, H / 2); ctx.stroke();
+        // Idle state: flat line
+        ctx.strokeStyle = 'rgba(255,176,0,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, H / 2);
+        ctx.lineTo(W, H / 2);
+        ctx.stroke();
     }
 }
 
