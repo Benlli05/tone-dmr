@@ -11,6 +11,7 @@ class DMRGenerator {
         this.isPlaying = false;
         this.activeNodes = [];
         this.sequenceTimeout = null;
+        this._audioUnlocked = false;
 
         this.burstContainer = document.getElementById('burst-container');
         this.burstTemplate  = document.getElementById('burst-template');
@@ -22,6 +23,7 @@ class DMRGenerator {
 
         this.TEMPLATES = this._buildTemplates();
         this.init();
+        this._setupGlobalAudioUnlock();
     }
 
     // ─── Templates ────────────────────────────────────────────────────────
@@ -271,17 +273,79 @@ class DMRGenerator {
     }
 
     // ─── Audio Engine ─────────────────────────────────────────────────────
-    initAudio() {
+
+    /**
+     * Unlock audio on first user interaction (touch/click anywhere on the page).
+     * This is the industry-standard pattern used by Howler.js, Tone.js, etc.
+     * iOS WebKit will NOT allow audio to play unless the AudioContext was
+     * created AND resumed during a direct user gesture.
+     */
+    _setupGlobalAudioUnlock() {
+        const unlock = () => {
+            if (this._audioUnlocked) return;
+
+            // Create context if it doesn't exist yet
+            this._createAudioContext();
+
+            // Resume (this is what iOS actually needs within a gesture)
+            const resumePromise = this.audioCtx.resume();
+
+            // Play a silent buffer to doubly ensure unlock on older iOS
+            try {
+                const buf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
+                const src = this.audioCtx.createBufferSource();
+                src.buffer = buf;
+                src.connect(this.audioCtx.destination);
+                src.start(0);
+            } catch(e) { /* ignore */ }
+
+            // Once resumed, mark as unlocked and remove listeners
+            if (resumePromise && resumePromise.then) {
+                resumePromise.then(() => {
+                    this._audioUnlocked = true;
+                    this._removeUnlockListeners(unlock);
+                    document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ACTIVE';
+                });
+            } else {
+                this._audioUnlocked = true;
+                this._removeUnlockListeners(unlock);
+            }
+        };
+
+        // Listen on BOTH touch and click with capture to catch iOS gestures
+        document.addEventListener('touchstart', unlock, true);
+        document.addEventListener('touchend', unlock, true);
+        document.addEventListener('click', unlock, true);
+        document.addEventListener('keydown', unlock, true);
+
+        // Store reference so playSequence can call it directly too
+        this._unlockFn = unlock;
+    }
+
+    _removeUnlockListeners(fn) {
+        document.removeEventListener('touchstart', fn, true);
+        document.removeEventListener('touchend', fn, true);
+        document.removeEventListener('click', fn, true);
+        document.removeEventListener('keydown', fn, true);
+    }
+
+    _createAudioContext() {
         if (!this.audioCtx) {
-            const AC = window.AudioContext || window.webkitAudioContext;
-            try   { this.audioCtx = new AC({ sampleRate: 44100 }); }
-            catch  { this.audioCtx = new AC(); }
+            var AC = window.AudioContext || window.webkitAudioContext;
+            try {
+                this.audioCtx = new AC({ sampleRate: 44100 });
+            } catch(e) {
+                this.audioCtx = new AC();
+            }
             this.analyser = this.audioCtx.createAnalyser();
             this.analyser.fftSize = 2048;
             this.visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
-            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ACTIVE';
-            document.getElementById('samplerate').innerText   = 'SR: 44.1kHz';
+            document.getElementById('samplerate').innerText = 'SR: 44.1kHz';
         }
+    }
+
+    initAudio() {
+        this._createAudioContext();
     }
 
     _parseFreq(str) {
@@ -325,45 +389,40 @@ class DMRGenerator {
     }
 
     async playSequence() {
-        // ── Step 1: create context inside gesture (sync) ─────────────────
+        // Ensure context exists
         this.initAudio();
 
-        // ── Step 2: silent buffer — unlocks iOS audio permission (sync) ──
-        // Must happen BEFORE any await so we're still in the gesture context.
-        const silBuf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
-        const silSrc = this.audioCtx.createBufferSource();
-        silSrc.buffer = silBuf;
-        silSrc.connect(this.audioCtx.destination);
-        silSrc.start(0);
+        // If global unlock hasn't fired yet, do it now (first interaction = PLAY)
+        if (!this._audioUnlocked && this._unlockFn) {
+            this._unlockFn();
+        }
 
-        // ── Step 3: await resume — now context is truly running ───────────
-        // iOS: currentTime is frozen while suspended. We must wait for
-        // resume() to resolve before reading currentTime for scheduling.
+        // Await resume — context MUST be running before we read currentTime
         await this.audioCtx.resume();
 
-        // ── Step 4: schedule tones using fresh currentTime ────────────────
         this.stopSequence();
         this.updateBurstList();
         if (this.bursts.length === 0) return;
 
         this.isPlaying = true;
         document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
-        let startTime = this.audioCtx.currentTime + 0.08;
+        var startTime = this.audioCtx.currentTime + 0.1;
 
-        this.bursts.forEach(burst => {
-            const end   = startTime + burst.dur / 1000;
-            const parts = burst.freqs.includes('->') ? [burst.freqs] : burst.freqs.split(',').map(f => f.trim());
-            const vol   = 1 / parts.length;
-            parts.forEach(part => {
-                this._scheduleOsc(this.audioCtx, this.analyser, part, burst.type, startTime, end, burst.fadeIn, burst.fadeOut, vol);
-            });
+        this.bursts.forEach(function(burst) {
+            var end   = startTime + burst.dur / 1000;
+            var parts = burst.freqs.indexOf('->') !== -1 ? [burst.freqs] : burst.freqs.split(',').map(function(f) { return f.trim(); });
+            var vol   = 1 / parts.length;
+            for (var i = 0; i < parts.length; i++) {
+                this._scheduleOsc(this.audioCtx, this.analyser, parts[i], burst.type, startTime, end, burst.fadeIn, burst.fadeOut, vol);
+            }
             startTime = end;
-        });
+        }.bind(this));
 
         this.analyser.connect(this.audioCtx.destination);
-        const totalMs = (startTime - this.audioCtx.currentTime) * 1000;
-        this.sequenceTimeout = setTimeout(() => {
-            this.isPlaying = false;
+        var totalMs = (startTime - this.audioCtx.currentTime) * 1000;
+        var self = this;
+        this.sequenceTimeout = setTimeout(function() {
+            self.isPlaying = false;
             document.getElementById('audio-status').innerText = 'AUDIO ENGINE: READY';
         }, totalMs);
     }
