@@ -273,13 +273,31 @@ class DMRGenerator {
     // ─── Audio Engine ─────────────────────────────────────────────────────
     initAudio() {
         if (!this.audioCtx) {
-            this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            // iOS WebKit (Chrome/Safari) may not support custom sampleRate — fallback gracefully
+            try {
+                this.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            } catch(e) {
+                this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
             this.analyser = this.audioCtx.createAnalyser();
             this.analyser.fftSize = 2048;
             this.visualizerData = new Uint8Array(this.analyser.frequencyBinCount);
             document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ACTIVE';
             document.getElementById('samplerate').innerText   = 'SR: 44.1kHz';
         }
+    }
+
+    // iOS requires playing a silent buffer on first user gesture to unlock WebAudio
+    async _unlockAudio() {
+        if (this.audioCtx.state === 'suspended') {
+            await this.audioCtx.resume();
+        }
+        // Silent buffer trick for iOS
+        const buf = this.audioCtx.createBuffer(1, 1, this.audioCtx.sampleRate);
+        const src = this.audioCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(this.audioCtx.destination);
+        src.start(0);
     }
 
     _parseFreq(str) {
@@ -323,7 +341,7 @@ class DMRGenerator {
 
     async playSequence() {
         this.initAudio();
-        if (this.audioCtx.state === 'suspended') await this.audioCtx.resume();
+        await this._unlockAudio(); // handles iOS WebAudio unlock + resume
         this.stopSequence();
         this.updateBurstList();
         if (this.bursts.length === 0) return;
