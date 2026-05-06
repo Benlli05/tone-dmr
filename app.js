@@ -397,7 +397,7 @@ class DMRGenerator {
             this._unlockFn();
         }
 
-        // Await resume — context MUST be running before we read currentTime
+        // Await resume
         await this.audioCtx.resume();
 
         this.stopSequence();
@@ -405,26 +405,55 @@ class DMRGenerator {
         if (this.bursts.length === 0) return;
 
         this.isPlaying = true;
-        document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
-        var startTime = this.audioCtx.currentTime + 0.1;
+        document.getElementById('audio-status').innerText = 'AUDIO ENGINE: RENDERING...';
 
+        // ── Render offline first (same method as export — proven to work on iOS) ──
+        var sampleRate   = this.audioCtx.sampleRate || 44100;
+        var totalSamples = Math.floor(this.bursts.reduce(function(a, b) { return a + b.dur; }, 0) / 1000 * sampleRate);
+        if (totalSamples < 1) totalSamples = 1;
+        var offCtx = new OfflineAudioContext(1, totalSamples, sampleRate);
+
+        var startTime = 0;
+        var self = this;
         this.bursts.forEach(function(burst) {
             var end   = startTime + burst.dur / 1000;
             var parts = burst.freqs.indexOf('->') !== -1 ? [burst.freqs] : burst.freqs.split(',').map(function(f) { return f.trim(); });
             var vol   = 1 / parts.length;
             for (var i = 0; i < parts.length; i++) {
-                this._scheduleOsc(this.audioCtx, this.analyser, parts[i], burst.type, startTime, end, burst.fadeIn, burst.fadeOut, vol);
+                self._scheduleOsc(offCtx, offCtx.destination, parts[i], burst.type, startTime, end, burst.fadeIn, burst.fadeOut, vol);
             }
             startTime = end;
-        }.bind(this));
+        });
 
-        this.analyser.connect(this.audioCtx.destination);
-        var totalMs = (startTime - this.audioCtx.currentTime) * 1000;
-        var self = this;
-        this.sequenceTimeout = setTimeout(function() {
-            self.isPlaying = false;
-            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: READY';
-        }, totalMs);
+        try {
+            var buffer = await offCtx.startRendering();
+
+            // ── Play the rendered buffer through the live AudioContext ──
+            var source = this.audioCtx.createBufferSource();
+            source.buffer = buffer;
+
+            // Connect to destination directly (guaranteed audio output)
+            source.connect(this.audioCtx.destination);
+
+            // Also feed the analyser for visualization (parallel tap, no double audio)
+            if (this.analyser) {
+                source.connect(this.analyser);
+            }
+
+            source.start(0);
+            this.activeNodes.push(source);
+
+            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: PLAYING';
+
+            var totalMs = buffer.duration * 1000;
+            this.sequenceTimeout = setTimeout(function() {
+                self.isPlaying = false;
+                document.getElementById('audio-status').innerText = 'AUDIO ENGINE: READY';
+            }, totalMs);
+        } catch(e) {
+            this.isPlaying = false;
+            document.getElementById('audio-status').innerText = 'AUDIO ENGINE: ERROR';
+        }
     }
 
     stopSequence() {
